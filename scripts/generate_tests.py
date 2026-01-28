@@ -58,7 +58,11 @@ def generate_tests_for_function(func_info):
                 4. Include assertions that actually test behavior
                 5. Do NOT generate placeholder tests like assert True
 
-                Return ONLY the Python test code, no explanations.
+                Output rules:
+                - Do not use Markdown.
+                - Do not wrap code in triple backticks.
+                - Output must be valid Python file content starting with imports (if needed).
+
             """
 
     # Send the prompt to the model and get a response

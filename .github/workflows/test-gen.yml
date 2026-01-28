@@ -85,6 +85,18 @@ jobs:
           else
             echo "Test file was NOT created"
           fi
+      
+      - name: Validate generated tests
+        if: steps.changed-files.outputs.has_files == 'true' && steps.coverage-check.outcome == 'failure'
+        run: |
+          if [ -f "tests/test_generated.py" ]; then
+            echo "Validating syntax of generated test..."
+            python -m py_compile tests/test_generated.py
+            echo "Syntax OK ✅"
+          else
+            echo "No generated test file to validate."
+          fi
+
 
       - name: Commit generated tests
         if: steps.changed-files.outputs.has_files == 'true' && steps.coverage-check.outcome == 'failure'
