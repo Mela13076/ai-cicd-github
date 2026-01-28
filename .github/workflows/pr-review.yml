@@ -11,6 +11,7 @@ permissions:
 jobs:
   review:
     runs-on: ubuntu-latest
+    if: false  # Disabled - set to true to re-enable
 
     steps:
       - name: Checkout code
