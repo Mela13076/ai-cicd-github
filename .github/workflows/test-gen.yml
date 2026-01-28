@@ -34,26 +34,66 @@ jobs:
       - name: Get changed Python files
         id: changed-files
         run: |
-          FILES=$(git diff --name-only origin/${{ github.base_ref }}..HEAD -- '*.py' | grep -v '^tests/' | tr '\n' ' ')
-          echo "files=$FILES" >> $GITHUB_OUTPUT
+          # Get changed Python files, excluding tests and scripts directories
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}..HEAD -- '*.py' | grep -v '^tests/' | grep -v '^scripts/' || true)
+          if [ -z "$FILES" ]; then
+            echo "No changed Python files found"
+            echo "has_files=false" >> $GITHUB_OUTPUT
+          else
+            echo "Changed files:"
+            echo "$FILES"
+            echo "has_files=true" >> $GITHUB_OUTPUT
+            # Save to file for next step
+            echo "$FILES" > changed_files.txt
+          fi
 
       - name: Generate tests
-        if: steps.changed-files.outputs.files != ''
+        if: steps.changed-files.outputs.has_files == 'true'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          python scripts/generate_tests.py ${{ steps.changed-files.outputs.files }}
+          echo "Files to process:"
+          cat changed_files.txt
+          echo ""
+          echo "Running test generation script..."
+          # Read files and pass them as separate arguments
+          python scripts/generate_tests.py $(cat changed_files.txt | tr '\n' ' ')
+          echo ""
+          echo "Checking if test file was created..."
+          if [ -f "tests/test_generated.py" ]; then
+            echo "Test file exists"
+            wc -l tests/test_generated.py
+          else
+            echo "Test file was NOT created"
+          fi
 
       - name: Commit generated tests
+        if: steps.changed-files.outputs.has_files == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          if git diff --quiet tests/; then
-            echo "No new tests generated"
+          # Check if test_generated.py exists and has content
+          if [ ! -f "tests/test_generated.py" ]; then
+            echo "No test file generated - script may have found no functions to test"
             exit 0
           fi
 
-          git add tests/
+          # Check file size
+          if [ ! -s "tests/test_generated.py" ]; then
+            echo "Test file is empty"
+            exit 0
+          fi
+
+          # Check if there are actual changes to commit
+          # Use --exit-code to check if there are changes
+          git add tests/test_generated.py
+          if git diff --cached --quiet; then
+            echo "No new tests generated (file unchanged compared to last commit)"
+            git reset tests/test_generated.py
+            exit 0
+          fi
+
+          echo "Staging and committing generated tests..."
           git commit -m "Auto-generate tests for new code [skip ci]"
-          git push
+          git push || echo "Push failed (may already be up to date)"
