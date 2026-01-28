@@ -32,8 +32,13 @@ def extract_functions(file_path):
 def generate_tests_for_function(func_info):
     """Use Gemini to generate pytest tests for a function."""
 
+    # Check if API key is available
+    api_key = os.environ.get('GEMINI_API_KEY')
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY environment variable not set")
+
     # Create a Gemini client using your API key from environment variables
-    client = genai.Client(api_key=os.environ.get('GEMINI_API_KEY'))
+    client = genai.Client(api_key=api_key)
 
     # Write a multi-line prompt that includes the function details
     prompt = f"""Generate pytest tests for this Python function.
@@ -53,17 +58,28 @@ def generate_tests_for_function(func_info):
                 4. Include assertions that actually test behavior
                 5. Do NOT generate placeholder tests like assert True
 
-                Return ONLY the Python test code, no explanations.
+                Output rules:
+                - Do not use Markdown.
+                - Do not wrap code in triple backticks.
+                - Output must be valid Python file content starting with imports (if needed).
+
             """
 
     # Send the prompt to the model and get a response
-    response = client.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=prompt
-    )
-
-    # Return just the text from the response
-    return response.text
+    try:
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt
+        )
+        # Return just the text from the response
+        test_code = response.text.strip()
+        if not test_code:
+            print(f"    Warning: Empty response for {func_info['name']}")
+            return None
+        return test_code
+    except Exception as e:
+        print(f"    Error generating tests for {func_info['name']}: {e}")
+        return None
 
 def main():
     """Main function to generate tests for changed files."""
@@ -86,29 +102,45 @@ def main():
             continue
 
         print(f"Analyzing: {file_path}")
-        functions = extract_functions(file_path)
+        try:
+            functions = extract_functions(file_path)
+            print(f"  Found {len(functions)} function(s)")
+        except Exception as e:
+            print(f"  Error parsing {file_path}: {e}")
+            continue
 
         for func in functions:
             # Skip private functions (those starting with _)
             if func['name'].startswith('_'):
+                print(f"  Skipping private function: {func['name']}")
                 continue
 
             print(f"  Generating tests for: {func['name']}")
             tests = generate_tests_for_function(func)
-            all_tests.append(f"# Tests for {func['name']} from {file_path}\n{tests}")
+            if tests:
+                all_tests.append(f"# Tests for {func['name']} from {file_path}\n{tests}")
+            else:
+                print(f"    Failed to generate tests for {func['name']}")
 
     if all_tests:
         # Create tests directory if it doesn't exist
         os.makedirs('tests', exist_ok=True)
         test_file = 'tests/test_generated.py'
 
+        # Write new tests (always write to ensure git can detect changes)
+        new_content = "import pytest\n\n" + "\n\n".join(all_tests)
+        
         with open(test_file, 'w') as f:
-            f.write("import pytest\n\n")
-            f.write("\n\n".join(all_tests))
-
+            f.write(new_content)
         print(f"Generated tests written to: {test_file}")
+        print(f"Generated {len(all_tests)} test suite(s)")
+        print(f"File size: {len(new_content)} characters")
     else:
         print("No functions found to generate tests for")
+        print("This could mean:")
+        print("  - No public functions found in changed files")
+        print("  - All functions are private (start with _)")
+        print("  - API calls failed for all functions")
 
 
 # Only run this code when the script is executed directly
